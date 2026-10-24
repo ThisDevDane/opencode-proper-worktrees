@@ -1,0 +1,17 @@
+# Preserve the pinned OpenCode V2 packages under pnpm's release-age policy.
+minimumReleaseAgeExclude:
+  - "@opencode/ai@2.1.4"
+  - "@opencode/client@2.1.4"
+  - "@opencode/codemode@2.1.4"
+  - "@opencode/core@2.1.4"
+  - "@opencode/plugin@2.1.4"
+  - "@opencode/plugin-browser@2.1.4"
+  - "@opencode/protocol@2.1.4"
+  - "@opencode/schema@2.1.4"
+  - "@opencode/util@2.1.4"
+
+# Core also ships watcher/parser integrations that this Git-only adapter never loads.
+allowBuilds:
+  "@parcel/watcher@2.5.1": false
+  "tree-sitter-bash@0.25.0": false
+  "tree-sitter-powershell@0.25.10": false
