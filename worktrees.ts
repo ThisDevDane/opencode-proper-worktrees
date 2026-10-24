@@ -5,7 +5,7 @@ import { basename, dirname, resolve } from "node:path";
 import { Worktree } from "@opencode/plugin";
 import type { WorktreeDefinition } from "@opencode/plugin/promise/worktree";
 
-import { readOptions } from "./config.ts";
+import { readOptions, readProjectCopyPaths } from "./config.ts";
 import { copyPaths, exists, hasCode, inside } from "./copy.ts";
 import { git } from "./git.ts";
 import { nativeStrategy } from "./native-strategy.ts";
@@ -70,7 +70,8 @@ export function makeStrategy(
         /\r?\n$/,
         "",
       );
-      for (const path of config.copyPaths) {
+      const paths = await readProjectCopyPaths(sourceRoot, config.copyPaths, signal);
+      for (const path of paths) {
         if (inside(resolve(sourceRoot, path), target)) {
           throw new Error(`Copy path contains the worktree destination: ${path}`);
         }
@@ -92,7 +93,7 @@ export function makeStrategy(
           JSON.stringify({ strategy: strategyID, version: 1 }),
           { flag: "wx" },
         );
-        await copyPaths(sourceRoot, created.directory, config.copyPaths, signal);
+        await copyPaths(sourceRoot, created.directory, paths, signal);
         signal.throwIfAborted();
         return created;
       } catch (error) {

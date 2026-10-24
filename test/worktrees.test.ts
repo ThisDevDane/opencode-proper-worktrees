@@ -6,6 +6,7 @@ import {
   readFile,
   readlink,
   rename,
+  rm,
   symlink,
   writeFile,
 } from "node:fs/promises";
@@ -49,19 +50,100 @@ test("custom prefix and starting ref create a new branch without switching the s
   assert.equal((await git(f.source, ["rev-parse", "HEAD"])).trim(), later);
 });
 
-test("creates from the selected linked checkout, not the canonical checkout", async (t) => {
+test("creates and reads project copy paths from the selected linked checkout's root", async (t) => {
   const f = await fixture(t);
   const linked = join(f.root, "other checkout");
+  await mkdir(join(f.source, ".opencode"));
+  await writeFile(join(f.source, ".opencode", "worktree.jsonc"), "invalid canonical config");
   await git(f.source, ["worktree", "add", "-b", "other", "--", linked]);
   await writeFile(join(linked, "README.md"), "other branch\n");
   const other = await snapshot(linked, f.initial);
+  await mkdir(join(linked, ".opencode"));
+  await writeFile(join(linked, ".opencode", "worktree.jsonc"), '{"copyPaths":[".env"]}');
+  await mkdir(join(linked, "nested"));
   await writeFile(join(linked, ".env"), "from selected checkout");
-  await makeStrategy({ copyPaths: [".env"] }).create(
-    { sourceDirectory: linked, directory: f.directory },
+  await makeStrategy().create(
+    { sourceDirectory: join(linked, "nested"), directory: f.directory },
     { signal: signal() },
   );
   assert.equal((await git(f.directory, ["rev-parse", "HEAD"])).trim(), other);
   assert.equal(await readFile(join(f.directory, ".env"), "utf8"), "from selected checkout");
+  assert.equal(await exists(join(f.directory, ".opencode", "worktree.jsonc")), false);
+});
+
+test("merges global and project copy paths for ignored files and folders", async (t) => {
+  const f = await fixture(t);
+  await mkdir(join(f.source, ".opencode"));
+  await mkdir(join(f.source, "local"));
+  await writeFile(join(f.source, ".env"), "global selection");
+  await writeFile(join(f.source, "local", "settings.json"), "project selection");
+  await writeFile(
+    join(f.source, ".opencode", "worktree.jsonc"),
+    `{
+      // Add project files without repeating the globally installed plugin.
+      "copyPaths": ["./.env", "local/",],
+    }`,
+  );
+  await makeStrategy({ branchPrefix: "global/", copyPaths: [".env"] }).create(f, {
+    signal: signal(),
+  });
+  assert.equal(await readFile(join(f.directory, ".env"), "utf8"), "global selection");
+  assert.equal(
+    await readFile(join(f.directory, "local", "settings.json"), "utf8"),
+    "project selection",
+  );
+  assert.match((await git(f.directory, ["branch", "--show-current"])).trim(), /^global\//);
+});
+
+test("rereads project overrides on every creation, including disabling copying", async (t) => {
+  const f = await fixture(t);
+  const strategy = makeStrategy({ copyPaths: [".env"] });
+  const config = join(f.source, ".opencode", "worktree.jsonc");
+  await mkdir(join(f.source, ".opencode"));
+  await mkdir(join(f.source, "local"));
+  await writeFile(join(f.source, ".env"), "global selection");
+  await writeFile(join(f.source, "local", "settings.json"), "project selection");
+  for (const [name, paths] of [
+    ["replacement", ["local"]],
+    ["disabled", []],
+    ["defaults", undefined],
+  ] as const) {
+    if (paths === undefined) {
+      await rm(config);
+    } else {
+      await writeFile(config, JSON.stringify({ copyPaths: paths, inheritCopyPaths: false }));
+    }
+    const directory = join(f.root, name);
+    await strategy.create({ ...f, directory }, { signal: signal() });
+    assert.equal(await exists(join(directory, ".env")), name === "defaults");
+    assert.equal(await exists(join(directory, "local", "settings.json")), name === "replacement");
+  }
+});
+
+test("invalid project configuration and recursive project copies fail before native creation", async (t) => {
+  const f = await fixture(t);
+  const config = join(f.source, ".opencode", "worktree.jsonc");
+  await mkdir(join(f.source, ".opencode"));
+  const strategy = makeStrategy(
+    {},
+    {
+      ...nativeStrategy(),
+      async create() {
+        assert.fail("Invalid project configuration must not reach native creation.");
+      },
+    },
+  );
+  for (const text of ['{"copyPaths":[".env"]', '{"copyPaths":["../outside"]}']) {
+    await writeFile(config, text);
+    await assert.rejects(strategy.create(f, { signal: signal() }), /Invalid .*worktree\.jsonc:/);
+  }
+  await writeFile(config, '{"copyPaths":["local"]}');
+  await assert.rejects(
+    strategy.create({ ...f, directory: join(f.source, "local", "nested") }, { signal: signal() }),
+    /contains the worktree/,
+  );
+  assert.equal(await exists(f.directory), false);
+  assert.equal((await git(f.source, ["branch", "--list"])).trim(), "* main");
 });
 
 test("copies ignored files and folders, preserves relative paths, and skips missing paths", async (t) => {
@@ -109,16 +191,15 @@ test("copies internal relative symlinks, but never nested .git metadata", async 
   assert.equal(await exists(join(f.directory, "local", ".git")), false);
 });
 
-test("failed copy rolls back only its worktree and branch", async (t) => {
+test("failed project-selected copy rolls back only its worktree and branch", async (t) => {
   const f = await fixture(t);
+  await mkdir(join(f.source, ".opencode"));
+  await writeFile(join(f.source, ".opencode", "worktree.jsonc"), '{"copyPaths":[".env"]}');
   const external = join(f.root, "outside");
   await writeFile(external, "untouched");
   await symlink("../outside", join(f.source, ".env"));
   const branches = await git(f.source, ["branch", "--list"]);
-  await assert.rejects(
-    makeStrategy({ copyPaths: [".env"] }).create(f, { signal: signal() }),
-    /symlink/,
-  );
+  await assert.rejects(makeStrategy().create(f, { signal: signal() }), /symlink/);
   assert.equal(await exists(f.directory), false);
   assert.equal(await git(f.source, ["branch", "--list"]), branches);
   assert.equal((await nativeStrategy().list(f.source, { signal: signal() })).length, 1);

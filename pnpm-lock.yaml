@@ -175,6 +175,9 @@ importers:
       '@opencode/util':
         specifier: 2.1.4
         version: 2.1.4(@opentelemetry/semantic-conventions@1.43.0)(redis@6.3.0(@opentelemetry/api@1.9.0))
+      jsonc-parser:
+        specifier: 3.3.1
+        version: 3.3.1
     devDependencies:
       '@types/node':
         specifier: 24.19.2

@@ -41,6 +41,8 @@ opencode plugin update 'git+ssh://git@github.com/ThisDevDane/opencode-proper-wor
 
 ## Configuration
 
+Set these options in the plugin entry. `copyPaths` provides defaults that each project can extend or replace.
+
 | Option         | Default       | Behavior                                                                                                                                                         |
 | -------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `branchPrefix` | `"opencode/"` | Prepended verbatim to each generated branch name. Include `/` or `-` if wanted. An empty string disables the prefix. The result must be a valid Git branch name. |
@@ -59,6 +61,34 @@ Set the destination separately with OpenCode's standard `worktree.directory` set
 
 Relative destinations resolve against the canonical checkout, not the plugin directory. Without this setting, OpenCode uses its normal server data directory.
 
+### Project copy paths
+
+With the plugin installed globally, add project-specific paths in `.opencode/worktree.jsonc` at the checkout root:
+
+```jsonc
+{
+  // Add these to the plugin's default copyPaths.
+  "copyPaths": ["appsettings.Development.json", "local/"],
+}
+```
+
+By default, the plugin combines its configured paths with the project's paths and removes normalized duplicates. Both project settings are optional: `copyPaths` defaults to `[]`, and `inheritCopyPaths` defaults to `true`. A missing project file leaves plugin defaults unchanged.
+
+Set `inheritCopyPaths` to `false` to replace the defaults:
+
+```jsonc
+{
+  "copyPaths": ["local/"],
+  "inheritCopyPaths": false,
+}
+```
+
+An empty or omitted `copyPaths` list with inheritance disabled copies nothing. `branchPrefix` remains a plugin option and cannot be set in this file.
+
+This file belongs to the plugin, not OpenCode's built-in configuration. You do not need another plugin entry in the project. You can commit the copy list while keeping the selected local files ignored.
+
+The plugin reads the file from the selected source checkout on every creation, including when the source is another worktree or a subdirectory. It uses the file currently on disk, not the version in the requested starting ref or destination. Edits apply to the next creation without reloading the plugin. Comments and trailing commas are supported. Invalid configuration fails before native worktree creation, with the configuration filename in the error.
+
 ### Branches and source checkouts
 
 New branches start at the selected source checkout's `HEAD`, or at the starting ref supplied to OpenCode's create operation. That starting ref does not become the new branch name. The source checkout stays on its original branch.
@@ -75,7 +105,7 @@ All internal imports, service setup, cancellation, and native error conversion l
 
 ### Copy behavior
 
-- Paths resolve from the selected source checkout's root. OpenCode loads plugin options from the canonical checkout, even when creating from another checkout.
+- Paths and `.opencode/worktree.jsonc` resolve from the selected source checkout's root. OpenCode loads plugin options from the canonical checkout, even when creating from another checkout.
 - Missing paths are skipped, so shared configurations can list optional files.
 - Directories merge, but existing destination files are never overwritten. Modified tracked files therefore keep the version from the starting ref.
 - Files copy independently of Git's ignore rules. The plugin does not stage them or change ignore rules. Non-ignored copies appear as untracked files.
@@ -109,4 +139,4 @@ Optional local hooks:
 hk install
 ```
 
-Tests use the imported native strategy with temporary Git repositories and do not call a live OpenCode server. They cover delegation, attached branches, starting refs, ignored-file copying, symlink checks, rollback, discovery, forced removal, and native error conversion. Set `OPENCODE_TEST_TMPDIR` to choose the temporary parent directory.
+Tests use the imported native strategy with temporary Git repositories and do not call a live OpenCode server. They cover delegation, attached branches, starting refs, project copy configuration, ignored-file copying, symlink checks, rollback, discovery, forced removal, and native error conversion. Set `OPENCODE_TEST_TMPDIR` to choose the temporary parent directory.
